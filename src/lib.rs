@@ -254,6 +254,10 @@ impl PyValue {
             PyId(MaybeOwned::Borrowed(s)))
     }
 
+    pub fn is_handle(&self) -> bool {
+        self._blob_schema.is_some()
+    }
+
     pub fn bytes(&self) -> Cow<[u8]> {
         (&self.value).into()
     }
@@ -391,7 +395,6 @@ impl PyQuery {
 #[pymodule]
 #[pyo3(name = "tribles")]
 pub fn tribles_python(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    //m.add_class::<PyValue>()?;
     m.add_class::<PyTribleSet>()?;
     m.add_class::<PyId>()?;
     m.add_class::<PyValue>()?;
