@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.9.9"
+__generated_with = "0.9.23"
 app = marimo.App()
 
 
@@ -104,27 +104,38 @@ def __(FR256LE, Value, fractions):
 
 
 @app.cell
-def __(name):
+def __(name, schema):
     class Variable:
-        def __init__(self, context, index, name=None):
-            self.context = context
+        def __init__(self, index, name=None):
             self.index = index
             self.name = name
-            self.schema = None
+            self.value_schema = None
+            self.blob_schema = None
 
-        def annotate_schema(self, schema):
-            if self.schema is None:
-                self.schema = schema
+        def annotate_schemas(self, value_schema, blob_schema = None):
+            if self.value_schema is None:
+                self.value_schema = value_schema
+                self.blob_schema = blob_schema
             else:
-                if self.schema != schema:
+                if self.value_schema != value_schema:
                     raise TypeError(
                         "variable"
                         + name
-                        + " annotated with conflicting schemas"
+                        + " annotated with conflicting value schemas"
                         + str(self.schema)
                         + " and "
                         + str(schema)
                     )
+                if self.blob_schema != blob_schema:
+                    raise TypeError(
+                        "variable"
+                        + name
+                        + " annotated with conflicting blob schemas"
+                        + str(self.schema)
+                        + " and "
+                        + str(schema)
+                    )
+
     return (Variable,)
 
 
@@ -160,10 +171,10 @@ def __(Id, RndId, Value, Variable, tribles):
                     entity_id = ctx.new()
                 if type(entity_id) is Variable:
                     e_v = entity_id
-                    e_v.annotate_schema(RndId)
+                    e_v.annotate_schemas(RndId)
                 else:
                     e_v = ctx.new()
-                    e_v.annotate_schema(RndId)
+                    e_v.annotate_schemas(RndId)
                     constraints.append(
                         tribles.constant(
                             e_v.index,
@@ -177,7 +188,7 @@ def __(Id, RndId, Value, Variable, tribles):
                     attr_schema = self.declaration[key][0]
 
                     a_v = ctx.new()
-                    a_v.annotate_schema(RndId)
+                    a_v.annotate_schemas(RndId)
                     constraints.append(
                         tribles.constant(
                             a_v.index,
@@ -186,10 +197,10 @@ def __(Id, RndId, Value, Variable, tribles):
 
                     if type(value) is Variable:
                         v_v = value
-                        v_v.annotate_schema(attr_schema)
+                        v_v.annotate_schemas(attr_schema)
                     else:
                         v_v = ctx.new()
-                        v_v.annotate_schema(attr_schema)
+                        v_v.annotate_schemas(attr_schema)
                         constraints.append(
                             tribles.constant(
                                 v_v.index,
@@ -216,7 +227,7 @@ def __(Variable):
         def new(self, name=None):
             i = len(self.variables)
             assert i < 128
-            v = Variable(self, i, name)
+            v = Variable(i, name)
             self.variables.append(v)
             return v
 

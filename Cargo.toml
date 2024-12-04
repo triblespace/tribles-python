@@ -10,5 +10,5 @@ crate-type = ["cdylib"]
 
 [dependencies]
 pyo3 = "0.21.1"
-tribles = "0.2.0"
+tribles = "0.4.0-alpha.5"
 hex = "0.4.3"
