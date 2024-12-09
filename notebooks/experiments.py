@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.9.30"
+__generated_with = "0.9.32"
 app = marimo.App()
 
 
@@ -8,19 +8,14 @@ app = marimo.App()
 def __():
     import maturin_import_hook
     maturin_import_hook.install(settings=maturin_import_hook.MaturinSettings(release=True))
-    return (maturin_import_hook,)
+    import tribles
+    return maturin_import_hook, tribles
 
 
 @app.cell
 def __():
     import marimo as mo
     return (mo,)
-
-
-@app.cell
-def __():
-    import tribles
-    return (tribles,)
 
 
 @app.cell
@@ -95,6 +90,26 @@ def __(tribles):
 def __(tribles):
     Value = tribles.Value
     return (Value,)
+
+
+@app.cell
+def __(tribles):
+    IdOwner = tribles.IdOwner
+    return (IdOwner,)
+
+
+@app.cell
+def __(IdOwner):
+    owner = IdOwner()
+    with owner.lock() as o:
+        o.rngid()
+
+    return o, owner
+
+
+@app.cell
+def __():
+    return
 
 
 @app.cell
@@ -581,8 +596,15 @@ def __(Id):
 
 
 @app.cell
-def __(Id, bench_consume, element_count_exp, experiments, time_ns):
-    _experiment = Id.genid()
+def __(
+    Id,
+    IdOwner,
+    bench_consume,
+    element_count_exp,
+    experiments,
+    time_ns,
+):
+    _experiment = IdOwner.genid()
     bench_insert_consume_data = experiments.entity({Id: _experiment, "label": "consume"})
     for _i in range(element_count_exp):
         bench_insert_consume_data += experiments.entity(

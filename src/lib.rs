@@ -186,8 +186,13 @@ impl PyIdOwnerGuard {
         self.0 = None;
     }
 
-    pub fn __exit__(&mut self) {
+    pub fn __enter__(slf: PyRef<Self>) -> PyRef<Self> {
+        slf
+    }
+
+    pub fn __exit__(&mut self, _exc_type: PyObject, _exc_value: PyObject, _traceback: PyObject) -> bool {
         self.release();
+        false
     }
 }
 
@@ -409,6 +414,7 @@ impl PyQuery {
 pub fn tribles_python(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyTribleSet>()?;
     m.add_class::<PyId>()?;
+    m.add_class::<PyIdOwner>()?;
     m.add_class::<PyValue>()?;
     m.add_class::<PyVariable>()?;
     m.add_class::<PyConstraint>()?;
