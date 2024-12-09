@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.9.23"
+__generated_with = "0.9.30"
 app = marimo.App()
 
 
@@ -135,7 +135,6 @@ def __(name, schema):
                         + " and "
                         + str(schema)
                     )
-
     return (Variable,)
 
 
@@ -155,7 +154,7 @@ def __(Id, RndId, Value, Variable, tribles):
             for key, value in entity.items():
                 if key is Id:
                     continue
-                attr_id = self.declaration[key][1]
+                attr_id = self.declaration[key]
                 attr_schema = self.declaration[key][0]
                 value = Value.of(attr_schema, value)
                 set.add(entity_id, attr_id, value)
@@ -486,8 +485,8 @@ def __(FR256LE, fractions, register_converter):
 
 
 @app.cell
-def __(Id, context, ns):
-    experiments = ns(context, {
+def __(Id, ns):
+    experiments = ns({
         "label": Id.hex("EC80E5FBDF856CD47347D1BCFB5E0D3E"),
         "experiment": Id.hex("E3ABE180BD5742D92616671E643FA4E5"),
         "element_count": Id.hex("A8034B8D0D644DCAA053CA1374AE92A0"),
@@ -572,6 +571,12 @@ def __(timeit):
 @app.cell
 def __(mo):
     mo.md("""### Insert""")
+    return
+
+
+@app.cell
+def __(Id):
+    Id.genid()
     return
 
 
