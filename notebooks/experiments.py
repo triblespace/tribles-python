@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.9.32"
+__generated_with = "0.9.34"
 app = marimo.App()
 
 
@@ -103,13 +103,13 @@ def __(IdOwner):
     owner = IdOwner()
     with owner.lock() as o:
         o.rngid()
-
     return o, owner
 
 
 @app.cell
-def __():
-    return
+def __(TribleSet):
+    context = TribleSet.empty()
+    return (context,)
 
 
 @app.cell
@@ -153,24 +153,26 @@ def __(name, schema):
     return (Variable,)
 
 
-@app.cell
-def __(Id, RndId, Value, Variable, tribles):
+app._unparsable_cell(
+    r"""
     class Namespace:
-        def __init__(self, declaration):
-            self.declaration = declaration
+        def __init__(self, context, name_to_id):
+            self.context = context
+            self.name_to_id = name_to_id
+            self.name_to_schema = 
 
-        def entity(self, entity):
+        def entity(self, owner, entity):
             set = tribles.TribleSet.empty()
             if Id in entity:
                 entity_id = entity[Id]
             else:
-                entity_id = Id.genid()
+                entity_id = owner.fucid()
 
             for key, value in entity.items():
                 if key is Id:
                     continue
-                attr_id = self.declaration[key]
-                attr_schema = self.declaration[key][0]
+                attr_id = self.name_to_id[key]
+                attr_schema = self.name_to_schema[key]
                 value = Value.of(attr_schema, value)
                 set.add(entity_id, attr_id, value)
 
@@ -185,28 +187,28 @@ def __(Id, RndId, Value, Variable, tribles):
                     entity_id = ctx.new()
                 if type(entity_id) is Variable:
                     e_v = entity_id
-                    e_v.annotate_schemas(RndId)
+                    e_v.annotate_schemas(GenId)
                 else:
                     e_v = ctx.new()
-                    e_v.annotate_schemas(RndId)
+                    e_v.annotate_schemas(GenId)
                     constraints.append(
                         tribles.constant(
                             e_v.index,
-                            Value.of(RndId, entity_id),
+                            Value.of(GenId, entity_id),
                     ))
 
                 for key, value in entity.items():
                     if key is Id:
                         continue
-                    attr_id = self.declaration[key][1]
-                    attr_schema = self.declaration[key][0]
+                    attr_id = self.name_to_id[key]
+                    attr_schema = self.name_to_schema[key]
 
                     a_v = ctx.new()
-                    a_v.annotate_schemas(RndId)
+                    a_v.annotate_schemas(GenId)
                     constraints.append(
                         tribles.constant(
                             a_v.index,
-                            Value.of(RndId, attr_id),
+                            Value.of(GenId, attr_id),
                     ))
 
                     if type(value) is Variable:
@@ -222,13 +224,15 @@ def __(Id, RndId, Value, Variable, tribles):
                         ))
                     constraints.append(set.pattern(e_v.index, a_v.index, v_v.index))
             return tribles.intersect(constraints)
-    return (Namespace,)
+    """,
+    name="__"
+)
 
 
 @app.cell
 def __(Namespace):
-    def ns(declaration):
-        return Namespace(declaration)
+    def ns(context, declaration):
+        return Namespace(context, declaration)
     return (ns,)
 
 
@@ -307,8 +311,8 @@ def __(Id, fractions, register_type):
 @app.cell
 def __(Id):
     """an random 128 bit id (the first 128bits are zero padding)"""
-    RndId = Id.hex("DFA138FA94D059161C9AB8C800F6FEC4")
-    return (RndId,)
+    GenId = Id.hex("DFA138FA94D059161C9AB8C800F6FEC4")
+    return (GenId,)
 
 
 @app.cell
@@ -368,9 +372,9 @@ def __(Id):
 
 
 @app.cell
-def __(RndId, register_converter):
-    @register_converter(schema = RndId, type = str)
-    class RndId_str_Converter:
+def __(GenId, register_converter):
+    @register_converter(schema = GenId, type = str)
+    class GenId_str_Converter:
         @staticmethod
         def pack(value):
             assert len(value) == 32
@@ -378,13 +382,13 @@ def __(RndId, register_converter):
         @staticmethod
         def unpack(bytes):
             return bytes.hex().upper()
-    return (RndId_str_Converter,)
+    return (GenId_str_Converter,)
 
 
 @app.cell
-def __(Id, RndId, register_converter):
-    @register_converter(schema = RndId, type = Id)
-    class RndId_Id_Converter:
+def __(GenId, Id, register_converter):
+    @register_converter(schema = GenId, type = Id)
+    class GenId_Id_Converter:
         @staticmethod
         def pack(value):
             return bytes(16) + value.bytes()
@@ -393,7 +397,7 @@ def __(Id, RndId, register_converter):
             assert all(v == 0 for v in bytes[0: 16])
             assert not all(v == 0 for v in bytes[16: 32])
             return Id(bytes[16:32])
-    return (RndId_Id_Converter,)
+    return (GenId_Id_Converter,)
 
 
 @app.cell
@@ -500,8 +504,8 @@ def __(FR256LE, fractions, register_converter):
 
 
 @app.cell
-def __(Id, ns):
-    experiments = ns({
+def __(Id, context, ns):
+    experiments = ns(context, {
         "label": Id.hex("EC80E5FBDF856CD47347D1BCFB5E0D3E"),
         "experiment": Id.hex("E3ABE180BD5742D92616671E643FA4E5"),
         "element_count": Id.hex("A8034B8D0D644DCAA053CA1374AE92A0"),
@@ -515,17 +519,15 @@ def __(Id, ns):
 
 
 @app.cell
-def __():
-    """experiments = ns({
-        "label": (ShortString, Id.hex("EC80E5FBDF856CD47347D1BCFB5E0D3E")),
-        "experiment": (RndId, Id.hex("E3ABE180BD5742D92616671E643FA4E5")),
-        "element_count": (U256LE, Id.hex("A8034B8D0D644DCAA053CA1374AE92A0")),
-        "cpu_time": (NSDuration, Id.hex("1C333940F98D0CFCEBFCC408FA35FF92")),
-        "wall_time": (NSDuration, Id.hex("999BF50FFECF9C0B62FD23689A6CA0D0")),
-        "avg_distance": (FR256LE, Id.hex("78D9B9230C044FA4E1585AFD14CFB3EE")),
-        "change_count": (U256LE, Id.hex("AD5DD3F72FA8DD67AF0D0DA5298A98B9")),
-        "layer_explored": (U256LE, Id.hex("2DB0F43553543173C42C8AE1573A38DB")),
-    })"""
+def __(FR256LE, GenId, Id, NSDuration, ShortString, U256LE):
+    (ShortString, Id.hex("EC80E5FBDF856CD47347D1BCFB5E0D3E"))
+    (GenId, Id.hex("E3ABE180BD5742D92616671E643FA4E5"))
+    (U256LE, Id.hex("A8034B8D0D644DCAA053CA1374AE92A0"))
+    (NSDuration, Id.hex("1C333940F98D0CFCEBFCC408FA35FF92"))
+    (NSDuration, Id.hex("999BF50FFECF9C0B62FD23689A6CA0D0"))
+    (FR256LE, Id.hex("78D9B9230C044FA4E1585AFD14CFB3EE"))
+    (U256LE, Id.hex("AD5DD3F72FA8DD67AF0D0DA5298A98B9"))
+    (U256LE, Id.hex("2DB0F43553543173C42C8AE1573A38DB"))
     return
 
 
@@ -590,21 +592,14 @@ def __(mo):
 
 
 @app.cell
-def __(Id):
-    Id.genid()
+def __(owner):
+    owner.rngid()
     return
 
 
 @app.cell
-def __(
-    Id,
-    IdOwner,
-    bench_consume,
-    element_count_exp,
-    experiments,
-    time_ns,
-):
-    _experiment = IdOwner.genid()
+def __(Id, bench_consume, element_count_exp, experiments, owner, time_ns):
+    _experiment = owner.fucid()
     bench_insert_consume_data = experiments.entity({Id: _experiment, "label": "consume"})
     for _i in range(element_count_exp):
         bench_insert_consume_data += experiments.entity(
@@ -618,8 +613,15 @@ def __(
 
 
 @app.cell
-def __(Id, bench_mutable_add, element_count_exp, experiments, time_ns):
-    _experiment = Id.genid()
+def __(
+    Id,
+    bench_mutable_add,
+    element_count_exp,
+    experiments,
+    owner,
+    time_ns,
+):
+    _experiment = owner.fucid()
     bench_insert_mutable_add_data = experiments.entity(
         {Id: _experiment, "label": "mutable_add"}
     )

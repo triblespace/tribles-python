@@ -3,6 +3,7 @@ use std::{borrow::Cow, collections::HashMap, hash::Hash, sync::{Arc, LazyLock}};
 use parking_lot::{ArcMutexGuard, Mutex, RawMutex};
 use pyo3::{exceptions::{PyKeyError, PyRuntimeError, PyValueError}, intern, prelude::*, types::{PyBytes, PyType}};
 use tribles::{id::IdOwner, prelude::*, query::{constantconstraint::ConstantConstraint, Binding, Constraint, ContainsConstraint, Query, TriblePattern, Variable}, value::{schemas::UnknownValue, RawValue}};
+use tribles::metadata::metadata;
 
 use hex::FromHex;
 
@@ -26,7 +27,11 @@ static TYPE_TO_ENTITY: LazyLock<Mutex<HashMap<PyPtrIdentity<PyType>, Id>>> = Laz
     Mutex::new(HashMap::new())
 });
 
-static CONVERTERS: LazyLock<Mutex<HashMap<(Id, Id), Py<PyAny>>>> = LazyLock::new(|| {
+static VALUE_CONVERTERS: LazyLock<Mutex<HashMap<(Id, Id), Py<PyAny>>>> = LazyLock::new(|| {
+    Mutex::new(HashMap::new())
+});
+
+static BLOB_CONVERTERS: LazyLock<Mutex<HashMap<(Id, Id), Py<PyAny>>>> = LazyLock::new(|| {
     Mutex::new(HashMap::new())
 });
 
@@ -37,7 +42,7 @@ pub fn register_type(type_id: PyRef<'_, PyId>, typ: Py<PyType>) {
 }
 
 #[pyfunction]
-pub fn register_converter(schema_id: PyRef<'_, PyId>, typ: Py<PyType>, converter: Py<PyAny>) -> PyResult<()> {
+pub fn register_value_converter(value_schema_id: PyRef<'_, PyId>, typ: Py<PyType>, converter: Py<PyAny>) -> PyResult<()> {
     let type_id = {
         let type_to_entity = TYPE_TO_ENTITY.lock();
         let Some(entity) = type_to_entity.get(&PyPtrIdentity(typ)) else {
@@ -45,8 +50,20 @@ pub fn register_converter(schema_id: PyRef<'_, PyId>, typ: Py<PyType>, converter
         };
         entity.clone()
     };
-    let mut converters = CONVERTERS.lock();
-    converters.insert((schema_id.0, type_id), converter);
+    VALUE_CONVERTERS.lock().insert((value_schema_id.0, type_id), converter);
+    Ok(())
+}
+
+#[pyfunction]
+pub fn register_blob_converter(blob_schema_id: PyRef<'_, PyId>, typ: Py<PyType>, converter: Py<PyAny>) -> PyResult<()> {
+    let type_id = {
+        let type_to_entity = TYPE_TO_ENTITY.lock();
+        let Some(entity) = type_to_entity.get(&PyPtrIdentity(typ)) else {
+            return Err(PyErr::new::<PyKeyError, _>("type should be registered first"));
+        };
+        entity.clone()
+    };
+    BLOB_CONVERTERS.lock().insert((blob_schema_id.0, type_id), converter);
     Ok(())
 }
 
@@ -221,9 +238,11 @@ impl PyValue {
         })
     }
 
+    #[pyo3(signature = (value, value_schema, blob_schema=None))]
     #[staticmethod]
-    fn of(py: Python<'_>, value_schema: PyRef<'_, PyId>, value: Bound<'_, PyAny>) -> PyResult<Self> {
+    fn of(py: Python<'_>, value: Bound<'_, PyAny>, value_schema: PyRef<'_, PyId>, blob_schema: Option<PyRef<'_, PyId>>) -> PyResult<Self> {
         let value_schema = value_schema.0;
+        let blob_schema = blob_schema.map(|s| s.0);
         let type_id = {
             let typ = value.get_type().unbind();
             let type_to_entity = TYPE_TO_ENTITY.lock();
@@ -232,7 +251,7 @@ impl PyValue {
             };
             entity.clone()
         };
-        let converters = CONVERTERS.lock();
+        let converters = VALUE_CONVERTERS.lock();
         let Some(converter) = converters.get(&(value_schema, type_id)) else {
             return Err(PyErr::new::<PyKeyError, _>("converter should be registered first"));
         };
@@ -242,7 +261,7 @@ impl PyValue {
         Ok(Self {
             value,
             _value_schema: value_schema,
-            _blob_schema: None,
+            _blob_schema: blob_schema,
         })
     }
 
@@ -254,7 +273,7 @@ impl PyValue {
             };
             entity.clone()
         };
-        let converters = CONVERTERS.lock();
+        let converters = VALUE_CONVERTERS.lock();
         let Some(converter) = converters.get(&(self._value_schema, type_id)) else {
             return Err(PyErr::new::<PyKeyError, _>("converter should be registered first"));
         };
@@ -420,7 +439,8 @@ pub fn tribles_python(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyConstraint>()?;
     m.add_class::<PyQuery>()?;
     m.add_function(wrap_pyfunction!(register_type, m)?)?;
-    m.add_function(wrap_pyfunction!(register_converter, m)?)?;
+    m.add_function(wrap_pyfunction!(register_value_converter, m)?)?;
+    m.add_function(wrap_pyfunction!(register_blob_converter, m)?)?;
     m.add_function(wrap_pyfunction!(constant, m)?)?;
     m.add_function(wrap_pyfunction!(intersect, m)?)?;
     m.add_function(wrap_pyfunction!(solve, m)?)?;
