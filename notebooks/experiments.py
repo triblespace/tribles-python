@@ -114,7 +114,7 @@ def __(TribleSet):
 
 @app.cell
 def __(FR256LE, Value, fractions):
-    Value.of(FR256LE, fractions.Fraction(1,2)).to(fractions.Fraction)
+    Value.of(fractions.Fraction(1,2), FR256LE).to(fractions.Fraction)
     return
 
 
@@ -153,36 +153,53 @@ def __(name, schema):
     return (Variable,)
 
 
-app._unparsable_cell(
-    r"""
+@app.cell
+def __(GenId, Value, Variable, tribles):
     class Namespace:
-        def __init__(self, context, name_to_id):
-            self.context = context
-            self.name_to_id = name_to_id
-            self.name_to_schema = 
+        def __init__(self, description, naming = None):
+            self.description = description
+            self.naming = naming or tribles.get_label_naming(description)
+            self.name_to_value_schema = {
+                name: tribles.get_value_schema(description, id)
+                for (name, id) in naming.items()
+            }
+            self.name_to_blob_schema = {
+                name: tribles.get_blob_schema(description, id)
+                for (name, id) in naming.items()
+            }
 
-        def entity(self, owner, entity):
-            set = tribles.TribleSet.empty()
-            if Id in entity:
-                entity_id = entity[Id]
+        def entity(self, entity, owner = None, set = tribles.TribleSet.empty()):
+            if "@id" in entity:
+                entity_id = entity["@id"]
+                if owner and not owner.owns(entity_id):
+                    raise RuntimeError("entity id not owned by provided owner");
             else:
                 entity_id = owner.fucid()
 
             for key, value in entity.items():
-                if key is Id:
+                if key[0] is "@":
                     continue
-                attr_id = self.name_to_id[key]
-                attr_schema = self.name_to_schema[key]
-                value = Value.of(attr_schema, value)
+                attr_id = self.naming[key]
+                attr_value_schema = self.name_to_value_schema[key]
+                attr_blob_schema = self.name_to_blob_schema[key]
+                value = Value.of(value, attr_value_schema, attr_blob_schema)
                 set.add(entity_id, attr_id, value)
+
+            return set
+
+        def entities(self, entities, owner = None):
+            set = tribles.TribleSet.empty()
+
+            for entity in entities:
+                self.entity(entity, owner, set)
 
             return set
 
         def pattern(self, ctx, set, entities):
             constraints = []
             for entity in entities:
-                if Id in entity:
-                    entity_id = entity[Id]
+                if "@id" in entity:
+                    entity_id = entity["@id"]
                 else:
                     entity_id = ctx.new()
                 if type(entity_id) is Variable:
@@ -194,46 +211,55 @@ app._unparsable_cell(
                     constraints.append(
                         tribles.constant(
                             e_v.index,
-                            Value.of(GenId, entity_id),
-                    ))
+                            Value.of(entity_id, GenId),
+                        )
+                    )
 
                 for key, value in entity.items():
-                    if key is Id:
+                    if key[0] is "@":
                         continue
-                    attr_id = self.name_to_id[key]
-                    attr_schema = self.name_to_schema[key]
+                    attr_id = self.naming[key]
+                    attr_value_schema = self.name_to_value_schema[key]
+                    attr_blob_schema = self.name_to_blob_schema[key]
 
                     a_v = ctx.new()
                     a_v.annotate_schemas(GenId)
                     constraints.append(
                         tribles.constant(
                             a_v.index,
-                            Value.of(GenId, attr_id),
-                    ))
+                            Value.of(attr_id, GenId),
+                        )
+                    )
 
                     if type(value) is Variable:
                         v_v = value
-                        v_v.annotate_schemas(attr_schema)
+                        v_v.annotate_schemas(attr_value_schema, attr_blob_schema)
                     else:
                         v_v = ctx.new()
-                        v_v.annotate_schemas(attr_schema)
+                        v_v.annotate_schemas(attr_value_schema, attr_blob_schema)
                         constraints.append(
                             tribles.constant(
-                                v_v.index,
-                                Value.of(attr_schema, value)
-                        ))
-                    constraints.append(set.pattern(e_v.index, a_v.index, v_v.index))
+                                v_v.index, Value.of(value, attr_value_schema, attr_blob_schema)
+                            )
+                        )
+                    constraints.append(
+                        set.pattern(e_v.index, a_v.index, v_v.index)
+                    )
             return tribles.intersect(constraints)
-    """,
-    name="__"
-)
+    return (Namespace,)
 
 
 @app.cell
-def __(Namespace):
-    def ns(context, declaration):
-        return Namespace(context, declaration)
-    return (ns,)
+def __(Id, Namespace, tribles):
+    metadata_ns = Namespace(
+        tribles.metadata_description(),
+        {
+            "attr_name": Id.hex("2E26F8BA886495A8DF04ACF0ED3ACBD4"),
+            "value_schema": Id.hex("213F89E3F49628A105B3830BD3A6612C"),
+            "blob_schema": Id.hex("02FAF947325161918C6D2E7D9DBA3485"),
+        },
+    )
+    return (metadata_ns,)
 
 
 @app.cell
@@ -291,12 +317,12 @@ def __(tribles):
 
 @app.cell
 def __(tribles):
-    def register_converter(schema, type):
+    def register_value_converter(schema, type):
         def inner(converter):
-            tribles.register_converter(schema, type, converter)
+            tribles.register_value_converter(schema, type, converter)
             return converter
         return inner
-    return (register_converter,)
+    return (register_value_converter,)
 
 
 @app.cell
@@ -372,8 +398,8 @@ def __(Id):
 
 
 @app.cell
-def __(GenId, register_converter):
-    @register_converter(schema = GenId, type = str)
+def __(GenId, register_value_converter):
+    @register_value_converter(schema = GenId, type = str)
     class GenId_str_Converter:
         @staticmethod
         def pack(value):
@@ -386,8 +412,8 @@ def __(GenId, register_converter):
 
 
 @app.cell
-def __(GenId, Id, register_converter):
-    @register_converter(schema = GenId, type = Id)
+def __(GenId, Id, register_value_converter):
+    @register_value_converter(schema = GenId, type = Id)
     class GenId_Id_Converter:
         @staticmethod
         def pack(value):
@@ -401,8 +427,8 @@ def __(GenId, Id, register_converter):
 
 
 @app.cell
-def __(ShortString, register_converter):
-    @register_converter(schema = ShortString, type = str)
+def __(ShortString, register_value_converter):
+    @register_value_converter(schema = ShortString, type = str)
     class ShortString_str_Converter:
         @staticmethod
         def pack(value):
@@ -421,8 +447,8 @@ def __(ShortString, register_converter):
 
 
 @app.cell
-def __(I256BE, register_converter):
-    @register_converter(schema = I256BE, type = int)
+def __(I256BE, register_value_converter):
+    @register_value_converter(schema = I256BE, type = int)
     class I256BE_Int_Converter:
         @staticmethod
         def pack(value):
@@ -434,8 +460,8 @@ def __(I256BE, register_converter):
 
 
 @app.cell
-def __(I256LE, register_converter):
-    @register_converter(schema = I256LE, type = int)
+def __(I256LE, register_value_converter):
+    @register_value_converter(schema = I256LE, type = int)
     class I256LE_Int_Converter:
         @staticmethod
         def pack(value):
@@ -447,8 +473,8 @@ def __(I256LE, register_converter):
 
 
 @app.cell
-def __(U256BE, register_converter):
-    @register_converter(schema = U256BE, type = int)
+def __(U256BE, register_value_converter):
+    @register_value_converter(schema = U256BE, type = int)
     class U256BE_Int_Converter:
         @staticmethod
         def pack(value):
@@ -460,8 +486,8 @@ def __(U256BE, register_converter):
 
 
 @app.cell
-def __(U256LE, register_converter):
-    @register_converter(schema = U256LE, type = int)
+def __(U256LE, register_value_converter):
+    @register_value_converter(schema = U256LE, type = int)
     class U256LE_Int_Converter:
         @staticmethod
         def pack(value):
@@ -473,8 +499,8 @@ def __(U256LE, register_converter):
 
 
 @app.cell
-def __(NSDuration, register_converter):
-    @register_converter(schema = NSDuration, type = int)
+def __(NSDuration, register_value_converter):
+    @register_value_converter(schema = NSDuration, type = int)
     class NSDuration_Int_Converter:
         @staticmethod
         def pack(value):
@@ -486,8 +512,8 @@ def __(NSDuration, register_converter):
 
 
 @app.cell
-def __(FR256LE, fractions, register_converter):
-    @register_converter(schema = FR256LE, type = fractions.Fraction)
+def __(FR256LE, fractions, register_value_converter):
+    @register_value_converter(schema = FR256LE, type = fractions.Fraction)
     class FR128LE_Fraction_Converter:
         @staticmethod
         def pack(value):
@@ -504,30 +530,73 @@ def __(FR256LE, fractions, register_converter):
 
 
 @app.cell
-def __(Id, context, ns):
-    experiments = ns(context, {
-        "label": Id.hex("EC80E5FBDF856CD47347D1BCFB5E0D3E"),
-        "experiment": Id.hex("E3ABE180BD5742D92616671E643FA4E5"),
-        "element_count": Id.hex("A8034B8D0D644DCAA053CA1374AE92A0"),
-        "cpu_time": Id.hex("1C333940F98D0CFCEBFCC408FA35FF92"),
-        "wall_time": Id.hex("999BF50FFECF9C0B62FD23689A6CA0D0"),
-        "avg_distance": Id.hex("78D9B9230C044FA4E1585AFD14CFB3EE"),
-        "change_count": Id.hex("AD5DD3F72FA8DD67AF0D0DA5298A98B9"),
-        "layer_explored": Id.hex("2DB0F43553543173C42C8AE1573A38DB"),
-    })
+def __(metadata_ns):
+    metadata_ns.naming
+    return
+
+
+@app.cell
+def __(
+    FR256LE,
+    GenId,
+    Id,
+    NSDuration,
+    Namespace,
+    ShortString,
+    U256LE,
+    metadata_ns,
+):
+    experiments = Namespace(
+        metadata_ns.entities(
+            [
+                {
+                    "@id": Id.hex("EC80E5FBDF856CD47347D1BCFB5E0D3E"),
+                    "attr_name": "label",
+                    "value_schema": ShortString,
+                },
+                {
+                    "@id": Id.hex("E3ABE180BD5742D92616671E643FA4E5"),
+                    "attr_name": "experiment",
+                    "value_schema": GenId,
+                },
+                {
+                    "@id": Id.hex("A8034B8D0D644DCAA053CA1374AE92A0"),
+                    "attr_name": "element_count",
+                    "value_schema": U256LE,
+                },
+                {
+                    "@id": Id.hex("1C333940F98D0CFCEBFCC408FA35FF92"),
+                    "attr_name": "cpu_time",
+                    "value_schema": NSDuration,
+                },
+                {
+                    "@id": Id.hex("999BF50FFECF9C0B62FD23689A6CA0D0"),
+                    "attr_name": "wall_time",
+                    "value_schema": NSDuration,
+                },
+                {
+                    "@id": Id.hex("78D9B9230C044FA4E1585AFD14CFB3EE"),
+                    "attr_name": "avg_distance",
+                    "value_schema": FR256LE,
+                },
+                {
+                    "@id": Id.hex("AD5DD3F72FA8DD67AF0D0DA5298A98B9"),
+                    "attr_name": "change_count",
+                    "value_schema": FR256LE,
+                },
+                {
+                    "@id": Id.hex("2DB0F43553543173C42C8AE1573A38DB"),
+                    "attr_name": "layer_explored",
+                    "value_schema": FR256LE,
+                },
+            ]
+        )
+    )
     return (experiments,)
 
 
 @app.cell
-def __(FR256LE, GenId, Id, NSDuration, ShortString, U256LE):
-    (ShortString, Id.hex("EC80E5FBDF856CD47347D1BCFB5E0D3E"))
-    (GenId, Id.hex("E3ABE180BD5742D92616671E643FA4E5"))
-    (U256LE, Id.hex("A8034B8D0D644DCAA053CA1374AE92A0"))
-    (NSDuration, Id.hex("1C333940F98D0CFCEBFCC408FA35FF92"))
-    (NSDuration, Id.hex("999BF50FFECF9C0B62FD23689A6CA0D0"))
-    (FR256LE, Id.hex("78D9B9230C044FA4E1585AFD14CFB3EE"))
-    (U256LE, Id.hex("AD5DD3F72FA8DD67AF0D0DA5298A98B9"))
-    (U256LE, Id.hex("2DB0F43553543173C42C8AE1573A38DB"))
+def __():
     return
 
 

@@ -1,5 +1,6 @@
 use std::{borrow::Cow, collections::HashMap, hash::Hash, sync::{Arc, LazyLock}};
 
+use itertools::Itertools;
 use parking_lot::{ArcMutexGuard, Mutex, RawMutex};
 use pyo3::{exceptions::{PyKeyError, PyRuntimeError, PyValueError}, intern, prelude::*, types::{PyBytes, PyType}};
 use tribles::{id::IdOwner, prelude::*, query::{constantconstraint::ConstantConstraint, Binding, Constraint, ContainsConstraint, Query, TriblePattern, Variable}, value::{schemas::UnknownValue, RawValue}};
@@ -35,6 +36,56 @@ static BLOB_CONVERTERS: LazyLock<Mutex<HashMap<(Id, Id), Py<PyAny>>>> = LazyLock
     Mutex::new(HashMap::new())
 });
 
+
+#[pyfunction]
+pub fn get_value_schema(context: PyRef<'_, PyTribleSet>, attr_id: PyRef<'_, PyId>) -> PyResult<PyId>{
+    match find!((value_schema: Id),
+        metadata::pattern!(&context.0, [
+            {(attr_id.0) @
+                attr_value_schema: value_schema}
+        ]))
+        .exactly_one() {
+            Ok((schema_id,)) => Ok(PyId(schema_id)),
+            Err(results) => match results.count() {
+                0 => Err(PyErr::new::<PyKeyError, _>("attribute should be registered first")),
+                _ => Err(PyErr::new::<PyKeyError, _>("multiple value schemas for attribute"))
+            },
+        }
+}
+
+#[pyfunction]
+pub fn get_blob_schema(context: PyRef<'_, PyTribleSet>, attr_id: PyRef<'_, PyId>) -> PyResult<Option<PyId>>{
+    match find!((blob_schema: Id),
+        metadata::pattern!(&context.0, [
+            {(attr_id.0) @
+                attr_blob_schema: blob_schema}
+        ]))
+        .at_most_one() {
+            Ok(None) => Ok(None),
+            Ok(Some((schema_id,))) => Ok(Some(PyId(schema_id))),
+            Err(results) => match results.count() {
+                _ => Err(PyErr::new::<PyKeyError, _>("multiple blob schemas for attribute"))
+            },
+        }
+}
+
+#[pyfunction]
+pub fn get_label_naming(context: PyRef<'_, PyTribleSet>) -> PyResult<HashMap<String, PyId>> {
+    find!((name: String, attr_id: Id),
+        metadata::pattern!(&context.0, [
+            {attr_id @
+                attr_name: name
+            }]))
+    .into_group_map()
+    .into_iter()
+    .map(|(name, ids)| if ids.len() > 1 {
+        Err(PyErr::new::<PyKeyError, _>("multiple attributes with the same name"))
+    } else {
+        Ok((name, PyId(ids[0])))
+    })
+    .collect()
+}
+
 #[pyfunction]
 pub fn register_type(type_id: PyRef<'_, PyId>, typ: Py<PyType>) {
     let mut type_to_entity = TYPE_TO_ENTITY.lock();
@@ -65,6 +116,12 @@ pub fn register_blob_converter(blob_schema_id: PyRef<'_, PyId>, typ: Py<PyType>,
     };
     BLOB_CONVERTERS.lock().insert((blob_schema_id.0, type_id), converter);
     Ok(())
+}
+
+
+#[pyfunction]
+pub fn metadata_description() -> PyTribleSet {
+    PyTribleSet(tribles::metadata::metadata::description())
 }
 
 #[pyclass(frozen, name = "Id")]
@@ -222,22 +279,6 @@ pub struct PyValue {
 
 #[pymethods]
 impl PyValue {
-    #[new]
-    #[pyo3(signature = (bytes, value_schema, blob_schema=None))]
-    fn new(bytes: &[u8], value_schema: PyRef<'_, PyId>, blob_schema: Option<PyRef<'_, PyId>>) -> PyResult<Self> {
-        let Ok(bytes) = bytes.try_into() else {
-            return Err(PyErr::new::<PyRuntimeError, _>("values should be 32 bytes"));
-        };
-        let value_schema = value_schema.0;
-        let blob_schema = blob_schema.map(|s| s.0);
-
-        Ok(PyValue {
-            value: bytes,
-            _value_schema: value_schema,
-            _blob_schema: blob_schema,
-        })
-    }
-
     #[pyo3(signature = (value, value_schema, blob_schema=None))]
     #[staticmethod]
     fn of(py: Python<'_>, value: Bound<'_, PyAny>, value_schema: PyRef<'_, PyId>, blob_schema: Option<PyRef<'_, PyId>>) -> PyResult<Self> {
@@ -253,7 +294,7 @@ impl PyValue {
         };
         let converters = VALUE_CONVERTERS.lock();
         let Some(converter) = converters.get(&(value_schema, type_id)) else {
-            return Err(PyErr::new::<PyKeyError, _>("converter should be registered first"));
+            return Err(PyErr::new::<PyKeyError, _>(format!("no converter between value schema `{value_schema:X}` and type `{type_id:X}`")));
         };
         let bytes = converter.call_method(py, intern!(py, "pack"), (value, ), None)?;
         let bytes = bytes.downcast_bound::<PyBytes>(py)?;
@@ -328,12 +369,8 @@ impl PyTribleSet {
         PyTribleSet(self.0.clone())
     }
 
-    pub fn add(&mut self, owner: Bound<'_, PyIdOwnerGuard>, e: Bound<'_, PyId>,  a: Bound<'_, PyId>,  v: Py<PyValue>) -> PyResult<()> {
-        if !owner.borrow_mut().owns(e.borrow())? {
-            return Err(PyErr::new::<PyRuntimeError, _>("can only add tribles with owned entity id"));
-        };
-
-        self.0.insert(&(Trible::new(OwnedId::transmute_force(&e.borrow().0), &a.borrow().0, &Value::<UnknownValue>::new(v.get().value))));
+    pub fn add(&mut self, e: Bound<'_, PyId>, a: Bound<'_, PyId>,  v: Py<PyValue>) -> PyResult<()> {
+        self.0.insert(&(Trible::new(&e.borrow().0, &a.borrow().0, &Value::<UnknownValue>::new(v.get().value))));
         Ok(())
     }
 
@@ -441,6 +478,9 @@ pub fn tribles_python(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(register_type, m)?)?;
     m.add_function(wrap_pyfunction!(register_value_converter, m)?)?;
     m.add_function(wrap_pyfunction!(register_blob_converter, m)?)?;
+    m.add_function(wrap_pyfunction!(get_value_schema, m)?)?;
+    m.add_function(wrap_pyfunction!(get_blob_schema, m)?)?;
+    m.add_function(wrap_pyfunction!(metadata_description, m)?)?;
     m.add_function(wrap_pyfunction!(constant, m)?)?;
     m.add_function(wrap_pyfunction!(intersect, m)?)?;
     m.add_function(wrap_pyfunction!(solve, m)?)?;
