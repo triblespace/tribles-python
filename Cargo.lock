@@ -1785,8 +1785,7 @@ dependencies = [
 [[package]]
 name = "tribles"
 version = "0.4.0-alpha.18"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e60417e93e5548b01d144e5f66798190db605ea77b5dfa6a8164cbfdbcec8468"
+source = "git+https://github.com/triblespace/tribles-rust.git#27989104e4e14ffe5b692e49d97713d4a3bf16b7"
 dependencies = [
  "anybytes",
  "anyhow",
