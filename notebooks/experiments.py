@@ -1,15 +1,15 @@
 import marimo
 
-__generated_with = "0.10.6"
+__generated_with = "0.10.17"
 app = marimo.App()
 
 
 @app.cell
 def _():
-    import maturin_import_hook
-    maturin_import_hook.install(settings=maturin_import_hook.MaturinSettings(release=True))
+    #import maturin_import_hook
+    #maturin_import_hook.install(settings=maturin_import_hook.MaturinSettings(release=True))
     import tribles
-    return maturin_import_hook, tribles
+    return (tribles,)
 
 
 @app.cell
@@ -68,7 +68,7 @@ def _():
     return (alt,)
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(mo):
     mo.md("""# Tribles""")
     return
@@ -154,7 +154,7 @@ def _(GenId, Value, Variable, tribles):
 
         def entity(self, entity, owner = None):
             set = tribles.TribleSet.empty()
-            
+
             self.__entity(set, entity, owner)
 
             return set
@@ -187,14 +187,14 @@ def _(GenId, Value, Variable, tribles):
                                 Value.of(entity_id, GenId),
                             )
                         )
-        
+
                     for key, value in entity.items():
                         if key == "@id":
                             continue
                         attr_id = self.names[key]
                         attr_value_schema = self.name_to_value_schema[key]
                         attr_blob_schema = self.name_to_blob_schema[key]
-        
+
                         a_v = ctx.new()
                         a_v.annotate_schemas(GenId)
                         constraints.append(
@@ -203,7 +203,7 @@ def _(GenId, Value, Variable, tribles):
                                 Value.of(attr_id, GenId),
                             )
                         )
-        
+
                         if type(value) is Variable:
                             v_v = value
                             v_v.annotate_schemas(attr_value_schema, attr_blob_schema)

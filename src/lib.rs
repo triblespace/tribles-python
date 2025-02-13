@@ -1,10 +1,27 @@
-use std::{borrow::Cow, collections::HashMap, hash::Hash, sync::{Arc, LazyLock}};
+use std::{
+    borrow::Cow,
+    collections::HashMap,
+    hash::Hash,
+    sync::{Arc, LazyLock},
+};
 
 use itertools::Itertools;
 use parking_lot::{ArcMutexGuard, Mutex, RawMutex};
-use pyo3::{exceptions::{PyKeyError, PyRuntimeError, PyValueError}, prelude::*, types::{PyBytes, PyType}};
-use tribles::{id::IdOwner, prelude::*, query::{constantconstraint::ConstantConstraint, Binding, Constraint, ContainsConstraint, Query, TriblePattern, Variable}, value::{schemas::UnknownValue, RawValue}};
+use pyo3::{
+    exceptions::{PyKeyError, PyRuntimeError, PyValueError},
+    prelude::*,
+    types::{PyBytes, PyType},
+};
 use tribles::metadata::metadata;
+use tribles::{
+    id::IdOwner,
+    prelude::*,
+    query::{
+        constantconstraint::ConstantConstraint, Binding, Constraint, ContainsConstraint, Query,
+        TriblePattern, Variable,
+    },
+    value::{schemas::UnknownValue, RawValue},
+};
 
 use hex::FromHex;
 
@@ -24,72 +41,78 @@ impl<T> Hash for PyPtrIdentity<T> {
     }
 }
 
-static TYPE_TO_ENTITY: LazyLock<Mutex<HashMap<PyPtrIdentity<PyType>, Id>>> = LazyLock::new(|| {
-    Mutex::new(HashMap::new())
-});
+static TYPE_TO_ENTITY: LazyLock<Mutex<HashMap<PyPtrIdentity<PyType>, Id>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
-static TO_VALUE_CONVERTERS: LazyLock<Mutex<HashMap<(Id, Id), Py<PyAny>>>> = LazyLock::new(|| {
-    Mutex::new(HashMap::new())
-});
+static TO_VALUE_CONVERTERS: LazyLock<Mutex<HashMap<(Id, Id), Py<PyAny>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
-static FROM_VALUE_CONVERTERS: LazyLock<Mutex<HashMap<(Id, Id), Py<PyAny>>>> = LazyLock::new(|| {
-    Mutex::new(HashMap::new())
-});
+static FROM_VALUE_CONVERTERS: LazyLock<Mutex<HashMap<(Id, Id), Py<PyAny>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
-static TO_BLOB_CONVERTERS: LazyLock<Mutex<HashMap<(Id, Id), Py<PyAny>>>> = LazyLock::new(|| {
-    Mutex::new(HashMap::new())
-});
+static TO_BLOB_CONVERTERS: LazyLock<Mutex<HashMap<(Id, Id), Py<PyAny>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
-static FROM_BLOB_CONVERTERS: LazyLock<Mutex<HashMap<(Id, Id), Py<PyAny>>>> = LazyLock::new(|| {
-    Mutex::new(HashMap::new())
-});
-
+static FROM_BLOB_CONVERTERS: LazyLock<Mutex<HashMap<(Id, Id), Py<PyAny>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 #[pyfunction]
-pub fn get_value_schema(context: &PyTribleSet, attr_id: &PyId) -> PyResult<PyId>{
+pub fn get_value_schema(context: &PyTribleSet, attr_id: &PyId) -> PyResult<PyId> {
     match find!((value_schema: Id),
-        metadata::pattern!(&context.0.lock(), [
-            {(attr_id.0) @
-                attr_value_schema: value_schema}
-        ]))
-        .exactly_one() {
-            Ok((schema_id,)) => Ok(PyId(schema_id)),
-            Err(results) => match results.count() {
-                0 => Err(PyErr::new::<PyKeyError, _>("attribute should be registered first")),
-                _ => Err(PyErr::new::<PyKeyError, _>("multiple value schemas for attribute"))
-            },
-        }
+    metadata::pattern!(&context.0.lock(), [
+        {(attr_id.0) @
+            attr_value_schema: value_schema}
+    ]))
+    .exactly_one()
+    {
+        Ok((schema_id,)) => Ok(PyId(schema_id)),
+        Err(results) => match results.count() {
+            0 => Err(PyErr::new::<PyKeyError, _>(
+                "attribute should be registered first",
+            )),
+            _ => Err(PyErr::new::<PyKeyError, _>(
+                "multiple value schemas for attribute",
+            )),
+        },
+    }
 }
 
 #[pyfunction]
-pub fn get_blob_schema(context: &PyTribleSet, attr_id: &PyId) -> PyResult<Option<PyId>>{
+pub fn get_blob_schema(context: &PyTribleSet, attr_id: &PyId) -> PyResult<Option<PyId>> {
     match find!((blob_schema: Id),
-        metadata::pattern!(&context.0.lock(), [
-            {(attr_id.0) @
-                attr_blob_schema: blob_schema}
-        ]))
-        .at_most_one() {
-            Ok(None) => Ok(None),
-            Ok(Some((schema_id,))) => Ok(Some(PyId(schema_id))),
-            Err(results) => match results.count() {
-                _ => Err(PyErr::new::<PyKeyError, _>("multiple blob schemas for attribute"))
-            },
-        }
+    metadata::pattern!(&context.0.lock(), [
+        {(attr_id.0) @
+            attr_blob_schema: blob_schema}
+    ]))
+    .at_most_one()
+    {
+        Ok(None) => Ok(None),
+        Ok(Some((schema_id,))) => Ok(Some(PyId(schema_id))),
+        Err(results) => match results.count() {
+            _ => Err(PyErr::new::<PyKeyError, _>(
+                "multiple blob schemas for attribute",
+            )),
+        },
+    }
 }
 
 #[pyfunction]
 pub fn get_label_names(context: &PyTribleSet) -> PyResult<HashMap<String, PyId>> {
     find!((name: String, attr_id: Id),
-        metadata::pattern!(&context.0.lock(), [
-            {attr_id @
-                attr_name: name
-            }]))
+    metadata::pattern!(&context.0.lock(), [
+        {attr_id @
+            attr_name: name
+        }]))
     .into_group_map()
     .into_iter()
-    .map(|(name, ids)| if ids.len() > 1 {
-        Err(PyErr::new::<PyKeyError, _>("multiple attributes with the same name"))
-    } else {
-        Ok((name, PyId(ids[0])))
+    .map(|(name, ids)| {
+        if ids.len() > 1 {
+            Err(PyErr::new::<PyKeyError, _>(
+                "multiple attributes with the same name",
+            ))
+        } else {
+            Ok((name, PyId(ids[0])))
+        }
     })
     .collect()
 }
@@ -101,7 +124,11 @@ pub fn register_type(type_id: &PyId, typ: Py<PyType>) {
 }
 
 #[pyfunction]
-pub fn register_to_value_converter(value_schema_id: &PyId, typ: Py<PyType>, converter: Py<PyAny>) -> PyResult<()> {
+pub fn register_to_value_converter(
+    value_schema_id: &PyId,
+    typ: Py<PyType>,
+    converter: Py<PyAny>,
+) -> PyResult<()> {
     let type_id = {
         let type_to_entity = TYPE_TO_ENTITY.lock();
         let Some(entity) = type_to_entity.get(&PyPtrIdentity(typ)) else {
@@ -109,12 +136,18 @@ pub fn register_to_value_converter(value_schema_id: &PyId, typ: Py<PyType>, conv
         };
         entity.clone()
     };
-    TO_VALUE_CONVERTERS.lock().insert((value_schema_id.0, type_id), converter);
+    TO_VALUE_CONVERTERS
+        .lock()
+        .insert((value_schema_id.0, type_id), converter);
     Ok(())
 }
 
 #[pyfunction]
-pub fn register_from_value_converter(value_schema_id: &PyId, typ: Py<PyType>, converter: Py<PyAny>) -> PyResult<()> {
+pub fn register_from_value_converter(
+    value_schema_id: &PyId,
+    typ: Py<PyType>,
+    converter: Py<PyAny>,
+) -> PyResult<()> {
     let type_id = {
         let type_to_entity = TYPE_TO_ENTITY.lock();
         let Some(entity) = type_to_entity.get(&PyPtrIdentity(typ)) else {
@@ -122,12 +155,18 @@ pub fn register_from_value_converter(value_schema_id: &PyId, typ: Py<PyType>, co
         };
         entity.clone()
     };
-    FROM_VALUE_CONVERTERS.lock().insert((value_schema_id.0, type_id), converter);
+    FROM_VALUE_CONVERTERS
+        .lock()
+        .insert((value_schema_id.0, type_id), converter);
     Ok(())
 }
 
 #[pyfunction]
-pub fn register_to_blob_converter(blob_schema_id: &PyId, typ: Py<PyType>, converter: Py<PyAny>) -> PyResult<()> {
+pub fn register_to_blob_converter(
+    blob_schema_id: &PyId,
+    typ: Py<PyType>,
+    converter: Py<PyAny>,
+) -> PyResult<()> {
     let type_id = {
         let type_to_entity = TYPE_TO_ENTITY.lock();
         let Some(entity) = type_to_entity.get(&PyPtrIdentity(typ)) else {
@@ -135,12 +174,18 @@ pub fn register_to_blob_converter(blob_schema_id: &PyId, typ: Py<PyType>, conver
         };
         entity.clone()
     };
-    TO_BLOB_CONVERTERS.lock().insert((blob_schema_id.0, type_id), converter);
+    TO_BLOB_CONVERTERS
+        .lock()
+        .insert((blob_schema_id.0, type_id), converter);
     Ok(())
 }
 
 #[pyfunction]
-pub fn register_from_blob_converter(blob_schema_id: &PyId, typ: Py<PyType>, converter: Py<PyAny>) -> PyResult<()> {
+pub fn register_from_blob_converter(
+    blob_schema_id: &PyId,
+    typ: Py<PyType>,
+    converter: Py<PyAny>,
+) -> PyResult<()> {
     let type_id = {
         let type_to_entity = TYPE_TO_ENTITY.lock();
         let Some(entity) = type_to_entity.get(&PyPtrIdentity(typ)) else {
@@ -148,10 +193,11 @@ pub fn register_from_blob_converter(blob_schema_id: &PyId, typ: Py<PyType>, conv
         };
         entity.clone()
     };
-    FROM_BLOB_CONVERTERS.lock().insert((blob_schema_id.0, type_id), converter);
+    FROM_BLOB_CONVERTERS
+        .lock()
+        .insert((blob_schema_id.0, type_id), converter);
     Ok(())
 }
-
 
 #[pyfunction]
 pub fn metadata_description() -> PyTribleSet {
@@ -169,7 +215,9 @@ impl PyId {
             return Err(PyValueError::new_err("ids should be 16 bytes"));
         };
         let Some(id) = Id::new(id) else {
-            return Err(PyValueError::new_err("id must be non-nil (contain non-zero bytes)"));
+            return Err(PyValueError::new_err(
+                "id must be non-nil (contain non-zero bytes)",
+            ));
         };
         Ok(PyId(id))
     }
@@ -180,7 +228,9 @@ impl PyId {
             return Err(PyValueError::new_err("failed to parse hex id"));
         };
         let Some(id) = Id::new(id) else {
-            return Err(PyValueError::new_err("id must be non-nil (contain non-zero bytes)"));
+            return Err(PyValueError::new_err(
+                "id must be non-nil (contain non-zero bytes)",
+            ));
         };
         Ok(PyId(id))
     }
@@ -224,7 +274,7 @@ impl PyIdOwner {
 
     pub fn has(&self, v: PyRef<'_, PyVariable>) -> PyConstraint {
         PyConstraint {
-            constraint: Arc::new(self.0.lock_arc().has(Variable::new(v.index)))
+            constraint: Arc::new(self.0.lock_arc().has(Variable::new(v.index))),
         }
     }
 
@@ -246,7 +296,7 @@ impl PyIdOwnerGuard {
         let owned_id = rngid();
         if let Some(guard) = &mut *self.0.lock() {
             let id = guard.insert(owned_id);
-            Ok(PyId(id))   
+            Ok(PyId(id))
         } else {
             Err(PyErr::new::<PyRuntimeError, _>("guard has been released"))
         }
@@ -256,7 +306,7 @@ impl PyIdOwnerGuard {
         let owned_id = ufoid();
         if let Some(guard) = &mut *self.0.lock() {
             let id = guard.insert(owned_id);
-            Ok(PyId(id))   
+            Ok(PyId(id))
         } else {
             Err(PyErr::new::<PyRuntimeError, _>("guard has been released"))
         }
@@ -266,7 +316,7 @@ impl PyIdOwnerGuard {
         let owned_id = fucid();
         if let Some(guard) = &mut *self.0.lock() {
             let id = guard.insert(owned_id);
-            Ok(PyId(id))   
+            Ok(PyId(id))
         } else {
             Err(PyErr::new::<PyRuntimeError, _>("guard has been released"))
         }
@@ -275,7 +325,7 @@ impl PyIdOwnerGuard {
     pub fn has(&self, v: PyRef<'_, PyVariable>) -> PyResult<PyConstraint> {
         if let Some(guard) = &mut *self.0.lock() {
             Ok(PyConstraint {
-                constraint: Arc::new(guard.has(Variable::new(v.index)))
+                constraint: Arc::new(guard.has(Variable::new(v.index))),
             })
         } else {
             Err(PyErr::new::<PyRuntimeError, _>("guard has been released"))
@@ -298,7 +348,12 @@ impl PyIdOwnerGuard {
         slf
     }
 
-    pub fn __exit__(&self, _exc_type: PyObject, _exc_value: PyObject, _traceback: PyObject) -> bool {
+    pub fn __exit__(
+        &self,
+        _exc_type: PyObject,
+        _exc_value: PyObject,
+        _traceback: PyObject,
+    ) -> bool {
         self.release();
         false
     }
@@ -308,14 +363,19 @@ impl PyIdOwnerGuard {
 pub struct PyValue {
     value: RawValue,
     _value_schema: Id,
-    _blob_schema: Option<Id>
+    _blob_schema: Option<Id>,
 }
 
 #[pymethods]
 impl PyValue {
     #[pyo3(signature = (value, value_schema, blob_schema=None))]
     #[staticmethod]
-    fn of(py: Python<'_>, value: Bound<'_, PyAny>, value_schema: PyRef<'_, PyId>, blob_schema: Option<PyRef<'_, PyId>>) -> PyResult<Self> {
+    fn of(
+        py: Python<'_>,
+        value: Bound<'_, PyAny>,
+        value_schema: PyRef<'_, PyId>,
+        blob_schema: Option<PyRef<'_, PyId>>,
+    ) -> PyResult<Self> {
         let value_schema = value_schema.0;
         let blob_schema = blob_schema.map(|s| s.0);
         let type_id = {
@@ -328,9 +388,11 @@ impl PyValue {
         };
         let converters = TO_VALUE_CONVERTERS.lock();
         let Some(converter) = converters.get(&(value_schema, type_id)) else {
-            return Err(PyErr::new::<PyKeyError, _>(format!("no converter to schema from type`{value_schema:X}` and type `{type_id:X}`")));
+            return Err(PyErr::new::<PyKeyError, _>(format!(
+                "no converter to schema from type`{value_schema:X}` and type `{type_id:X}`"
+            )));
         };
-        let bytes = converter.call(py, (value, ), None)?;
+        let bytes = converter.call(py, (value,), None)?;
         let bytes = bytes.downcast_bound::<PyBytes>(py)?;
         let value: RawValue = bytes.as_bytes().try_into()?;
         Ok(Self {
@@ -350,7 +412,9 @@ impl PyValue {
         };
         let converters = FROM_VALUE_CONVERTERS.lock();
         let Some(converter) = converters.get(&(self._value_schema, type_id)) else {
-            return Err(PyErr::new::<PyKeyError, _>("no converter from schema to type"));
+            return Err(PyErr::new::<PyKeyError, _>(
+                "no converter from schema to type",
+            ));
         };
         let bytes = PyBytes::new(py, &self.value);
         converter.call(py, (bytes,), None)
@@ -361,8 +425,7 @@ impl PyValue {
     }
 
     pub fn blob_schema(&self) -> Option<PyId> {
-        self._blob_schema.map(|s| 
-            PyId(s))
+        self._blob_schema.map(|s| PyId(s))
     }
 
     pub fn is_handle(&self) -> bool {
@@ -403,8 +466,14 @@ impl PyTribleSet {
         PyTribleSet(Mutex::new(self.0.lock().clone()))
     }
 
-    pub fn add(&self, e: &PyId, a: &PyId,  v: &PyValue) -> PyResult<()> {
-        self.0.lock().insert(&(Trible::new(&e.0, &a.0, Value::<UnknownValue>::transmute_raw(&v.value))));
+    pub fn add(&self, e: &PyId, a: &PyId, v: &PyValue) -> PyResult<()> {
+        self.0.lock().insert(
+            &(Trible::new(
+                ExclusiveId::as_transmute_force(&e.0),
+                &a.0,
+                Value::<UnknownValue>::as_transmute_raw(&v.value),
+            )),
+        );
         Ok(())
     }
 
@@ -413,9 +482,18 @@ impl PyTribleSet {
         self.0.lock().union(other_set);
     }
 
-    pub fn pattern(&self, ev: PyRef<'_, PyVariable>, av: PyRef<'_, PyVariable>, vv: PyRef<'_, PyVariable>) -> PyConstraint {
+    pub fn pattern(
+        &self,
+        ev: PyRef<'_, PyVariable>,
+        av: PyRef<'_, PyVariable>,
+        vv: PyRef<'_, PyVariable>,
+    ) -> PyConstraint {
         PyConstraint {
-            constraint: Arc::new(self.0.lock().pattern(Variable::new(ev.index), Variable::new(av.index), Variable::<UnknownValue>::new(vv.index)))
+            constraint: Arc::new(self.0.lock().pattern(
+                Variable::new(ev.index),
+                Variable::new(av.index),
+                Variable::<UnknownValue>::new(vv.index),
+            )),
         }
     }
 }
@@ -423,94 +501,99 @@ impl PyTribleSet {
 #[pyclass(frozen, name = "Variable")]
 pub struct PyVariable {
     index: usize,
-    
+
     _value_schema: Id,
-    _blob_schema: Option<Id>
+    _blob_schema: Option<Id>,
 }
 
 #[pymethods]
-impl PyVariable {
-    
-}
-class Variable:
-    def __init__(self, index, name=None):
-        self.index = index
-        self.name = name
-        self.value_schema = None
-        self.blob_schema = None
+impl PyVariable {}
+// class Variable:
+//     def __init__(self, index, name=None):
+//         self.index = index
+//         self.name = name
+//         self.value_schema = None
+//         self.blob_schema = None
 
-    def annotate_schemas(self, value_schema, blob_schema = None):
-        if self.value_schema is None:
-            self.value_schema = value_schema
-            self.blob_schema = blob_schema
-        else:
-            if self.value_schema != value_schema:
-                raise TypeError(
-                    "variable"
-                    + name
-                    + " annotated with conflicting value schemas"
-                    + str(self.schema)
-                    + " and "
-                    + str(schema)
-                )
-            if self.blob_schema != blob_schema:
-                raise TypeError(
-                    "variable"
-                    + name
-                    + " annotated with conflicting blob schemas"
-                    + str(self.schema)
-                    + " and "
-                    + str(schema)
-                )
+//     def annotate_schemas(self, value_schema, blob_schema = None):
+//         if self.value_schema is None:
+//             self.value_schema = value_schema
+//             self.blob_schema = blob_schema
+//         else:
+//             if self.value_schema != value_schema:
+//                 raise TypeError(
+//                     "variable"
+//                     + name
+//                     + " annotated with conflicting value schemas"
+//                     + str(self.schema)
+//                     + " and "
+//                     + str(schema)
+//                 )
+//             if self.blob_schema != blob_schema:
+//                 raise TypeError(
+//                     "variable"
+//                     + name
+//                     + " annotated with conflicting blob schemas"
+//                     + str(self.schema)
+//                     + " and "
+//                     + str(schema)
+//                 )
 
 #[pyclass(frozen, name = "Query")]
 pub struct PyQuery {
-    query: Mutex<Query<Arc<dyn Constraint<'static> + Send + Sync>, Box<dyn Fn(&Binding) -> Vec<PyValue> + Send>, Vec<PyValue>>>
+    query: Mutex<
+        Query<
+            Arc<dyn Constraint<'static> + Send + Sync>,
+            Box<dyn Fn(&Binding) -> Vec<PyValue> + Send>,
+            Vec<PyValue>,
+        >,
+    >,
 }
 
 #[pyclass(frozen)]
 pub struct PyConstraint {
-    constraint: Arc<dyn Constraint<'static> + Send + Sync>
+    constraint: Arc<dyn Constraint<'static> + Send + Sync>,
 }
 
 /// Build a constraint for the intersection of the provided constraints.
 #[pyfunction]
-pub fn constant(index: u8, constant: &Bound<'_, PyValue>) -> PyConstraint {
+pub fn constant(index: usize, constant: &Bound<'_, PyValue>) -> PyConstraint {
     let constraint = Arc::new(ConstantConstraint::new(
         Variable::<UnknownValue>::new(index),
-        Value::<UnknownValue>::new(constant.get().value)));
+        Value::<UnknownValue>::new(constant.get().value),
+    ));
 
-    PyConstraint {
-        constraint
-    }
+    PyConstraint { constraint }
 }
-
 
 /// Build a constraint for the intersection of the provided constraints.
 #[pyfunction]
 pub fn intersect(constraints: Vec<Py<PyConstraint>>) -> PyConstraint {
-    let constraints = constraints.iter().map(|py| py.get().constraint.clone()).collect();
+    let constraints = constraints
+        .iter()
+        .map(|py| py.get().constraint.clone())
+        .collect();
     let constraint = Arc::new(IntersectionConstraint::new(constraints));
 
-    PyConstraint {
-        constraint
-    }
+    PyConstraint { constraint }
 }
 
 /// Find solutions for the provided constraint.
 #[pyfunction]
-pub fn solve(projected: Vec<Py<PyVariable>> ,constraint: &PyConstraint) -> PyQuery {
+pub fn solve(projected: Vec<Py<PyVariable>>, constraint: &PyConstraint) -> PyQuery {
     let constraint = constraint.constraint.clone();
 
     let postprocessing = Box::new(move |binding: &Binding| {
         let mut vec = vec![];
         for v in &projected {
             let v = v.get();
-            let value = *binding.get(v.index).expect("constraint should contain projected variables");
+            let value = *binding
+                .get(v.index)
+                .expect("constraint should contain projected variables");
             vec.push(PyValue {
                 value,
                 _value_schema: v._value_schema,
-                _blob_schema: v._blob_schema
+                _blob_schema: v._blob_schema,
             });
         }
         vec
@@ -519,7 +602,7 @@ pub fn solve(projected: Vec<Py<PyVariable>> ,constraint: &PyConstraint) -> PyQue
     let query = tribles::query::Query::new(constraint, postprocessing);
 
     PyQuery {
-        query: Mutex::new(query)
+        query: Mutex::new(query),
     }
 }
 
