@@ -99,6 +99,18 @@ def _(tribles):
 
 
 @app.cell
+def _(tribles):
+    Variable = tribles.Variable
+    return (Variable,)
+
+
+@app.cell
+def _(tribles):
+    VariableContext = tribles.VariableContext
+    return (VariableContext,)
+
+
+@app.cell
 def _(IdOwner):
     owner = IdOwner()
     with owner.lock() as o:
@@ -234,35 +246,6 @@ def _(Id, Namespace, tribles):
         },
     )
     return (metadata_ns,)
-
-
-@app.cell
-def _(Variable):
-    class VariableContext:
-        def __init__(self):
-            self.variables = []
-
-        def new(self, name=None):
-            i = len(self.variables)
-            assert i < 128
-            v = Variable(i, name)
-            self.variables.append(v)
-            return v
-
-        def check_schemas(self):
-            for v in self.variables:
-                if not v.schema:
-                    if v.name:
-                        name = "'" + v.name + "'"
-                    else:
-                        name = "_"
-                    raise TypeError(
-                        "missing schema for variable "
-                        + name
-                        + "/"
-                        + str(v.index)
-                    )
-    return (VariableContext,)
 
 
 @app.cell

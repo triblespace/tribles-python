@@ -6,7 +6,7 @@ use std::{
 };
 
 use itertools::Itertools;
-use parking_lot::{ArcMutexGuard, Mutex, RawMutex};
+use parking_lot::{ArcMutexGuard, Mutex, RawMutex, RwLock};
 use pyo3::{
     exceptions::{PyKeyError, PyRuntimeError, PyValueError},
     prelude::*,
@@ -204,6 +204,7 @@ pub fn metadata_description() -> PyTribleSet {
     PyTribleSet(Mutex::new(tribles::metadata::metadata::description()))
 }
 
+#[derive(Debug, Copy, Clone)]
 #[pyclass(frozen, name = "Id")]
 pub struct PyId(Id);
 
@@ -274,7 +275,7 @@ impl PyIdOwner {
 
     pub fn has(&self, v: PyRef<'_, PyVariable>) -> PyConstraint {
         PyConstraint {
-            constraint: Arc::new(self.0.lock_arc().has(Variable::new(v.index))),
+            constraint: Arc::new(self.0.lock_arc().has(Variable::new(v.0.read().index))),
         }
     }
 
@@ -325,7 +326,7 @@ impl PyIdOwnerGuard {
     pub fn has(&self, v: PyRef<'_, PyVariable>) -> PyResult<PyConstraint> {
         if let Some(guard) = &mut *self.0.lock() {
             Ok(PyConstraint {
-                constraint: Arc::new(guard.has(Variable::new(v.index))),
+                constraint: Arc::new(guard.has(Variable::new(v.0.read().index))),
             })
         } else {
             Err(PyErr::new::<PyRuntimeError, _>("guard has been released"))
@@ -490,24 +491,25 @@ impl PyTribleSet {
     ) -> PyConstraint {
         PyConstraint {
             constraint: Arc::new(self.0.lock().pattern(
-                Variable::new(ev.index),
-                Variable::new(av.index),
-                Variable::<UnknownValue>::new(vv.index),
+                Variable::new(ev.0.read().index),
+                Variable::new(av.0.read().index),
+                Variable::<UnknownValue>::new(vv.0.read().index),
             )),
         }
     }
 }
 
-#[pyclass(frozen, name = "Variable")]
-pub struct PyVariable {
+pub struct InnerVariable {
     index: usize,
+    name: String,
 
-    _value_schema: Id,
+    _value_schema: Option<Id>,
     _blob_schema: Option<Id>,
 }
 
-#[pymethods]
-impl PyVariable {}
+#[pyclass(frozen, name = "Variable")]
+pub struct PyVariable(RwLock<InnerVariable>);
+
 // class Variable:
 //     def __init__(self, index, name=None):
 //         self.index = index
@@ -538,6 +540,51 @@ impl PyVariable {}
 //                     + " and "
 //                     + str(schema)
 //                 )
+
+#[pymethods]
+impl PyVariable {
+    #[new]
+    pub fn new(index: usize, name: String) -> Self {
+        PyVariable(RwLock::new(InnerVariable {
+            index,
+            name,
+            _value_schema: None,
+            _blob_schema: None,
+        }))
+    }
+
+    #[pyo3(signature = (value_schema, blob_schema=None))]
+    pub fn annotate_schemas(&self, value_schema: PyId, blob_schema: Option<&PyId>) {
+        let mut variable = self.0.write();
+        variable._value_schema = Some(value_schema.0);
+        variable._blob_schema = blob_schema.map(|id| id.0);
+    }
+}
+
+//class VariableContext:
+//def __init__(self):
+//self.variables = []
+//
+//def new(self, name=None):
+//i = len(self.variables)
+//assert i < 128
+//v = Variable(i, name)
+//self.variables.append(v)
+//return v
+//
+//def check_schemas(self):
+//for v in self.variables:
+//    if not v.schema:
+//        if v.name:
+//            name = "'" + v.name + "'"
+//        else:
+//            name = "_"
+//        raise TypeError(
+//            "missing schema for variable "
+//            + name
+//            + "/"
+//            + str(v.index)
+//        )
 
 #[pyclass(frozen, name = "Query")]
 pub struct PyQuery {
@@ -580,7 +627,7 @@ pub fn intersect(constraints: Vec<Py<PyConstraint>>) -> PyConstraint {
 
 /// Find solutions for the provided constraint.
 #[pyfunction]
-pub fn solve(projected: Vec<Py<PyVariable>>, constraint: &PyConstraint) -> PyQuery {
+pub fn solve(projected: Vec<Py<PyVariable>>, constraint: &PyConstraint) -> PyResult<PyQuery> {
     let constraint = constraint.constraint.clone();
 
     let postprocessing = Box::new(move |binding: &Binding| {
@@ -588,12 +635,17 @@ pub fn solve(projected: Vec<Py<PyVariable>>, constraint: &PyConstraint) -> PyQue
         for v in &projected {
             let v = v.get();
             let value = *binding
-                .get(v.index)
+                .get(v.0.read().index)
                 .expect("constraint should contain projected variables");
+
             vec.push(PyValue {
                 value,
-                _value_schema: v._value_schema,
-                _blob_schema: v._blob_schema,
+                _value_schema: v
+                    .0
+                    .read()
+                    ._value_schema
+                    .expect("variable with uninitialized value schema"),
+                _blob_schema: v.0.read()._blob_schema,
             });
         }
         vec
@@ -601,9 +653,9 @@ pub fn solve(projected: Vec<Py<PyVariable>>, constraint: &PyConstraint) -> PyQue
 
     let query = tribles::query::Query::new(constraint, postprocessing);
 
-    PyQuery {
+    Ok(PyQuery {
         query: Mutex::new(query),
-    }
+    })
 }
 
 #[pymethods]
