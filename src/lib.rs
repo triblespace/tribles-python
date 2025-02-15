@@ -8,7 +8,7 @@ use std::{
 use itertools::Itertools;
 use parking_lot::{ArcMutexGuard, Mutex, RawMutex, RwLock};
 use pyo3::{
-    exceptions::{PyKeyError, PyRuntimeError, PyValueError},
+    exceptions::{PyKeyError, PyRuntimeError, PyTypeError, PyValueError},
     prelude::*,
     types::{PyBytes, PyType},
 };
@@ -561,30 +561,48 @@ impl PyVariable {
     }
 }
 
-//class VariableContext:
-//def __init__(self):
-//self.variables = []
-//
-//def new(self, name=None):
-//i = len(self.variables)
-//assert i < 128
-//v = Variable(i, name)
-//self.variables.append(v)
-//return v
-//
-//def check_schemas(self):
-//for v in self.variables:
-//    if not v.schema:
-//        if v.name:
-//            name = "'" + v.name + "'"
-//        else:
-//            name = "_"
-//        raise TypeError(
-//            "missing schema for variable "
-//            + name
-//            + "/"
-//            + str(v.index)
-//        )
+pub struct InnerVariableContext {
+    variables: Vec<Py<PyVariable>>,
+}
+
+#[pyclass(frozen, name = "VariableContext")]
+pub struct PyVariableContext(RwLock<InnerVariableContext>);
+
+#[pymethods]
+impl PyVariableContext {
+    #[new]
+    pub fn new() -> Self {
+        PyVariableContext(RwLock::new(InnerVariableContext {
+            variables: Vec::new(),
+        }))
+    }
+
+    #[pyo3(signature = (name))]
+    pub fn fresh_variable(&self, py: Python<'_>, name: String) -> Py<PyVariable> {
+        let mut variable_context = self.0.write();
+
+        let next_index = variable_context.variables.len();
+
+        let variable = Py::new(py, PyVariable::new(next_index, name)).unwrap();
+        variable_context.variables.push(variable.clone_ref(py));
+
+        return variable;
+    }
+
+    pub fn check_schemas(&self) -> PyResult<()> {
+        let variable_context = self.0.read();
+        for v in &variable_context.variables {
+            let variable = v.get().0.read();
+
+            if variable._value_schema.is_none() {
+                let name = &variable.name;
+                let msg = format!("missing value schema for variable {name}");
+                return Err(PyTypeError::new_err(msg));
+            }
+        }
+        Ok(())
+    }
+}
 
 #[pyclass(frozen, name = "Query")]
 pub struct PyQuery {
