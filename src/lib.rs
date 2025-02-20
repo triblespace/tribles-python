@@ -695,6 +695,7 @@ pub fn tribles_python(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyIdOwner>()?;
     m.add_class::<PyValue>()?;
     m.add_class::<PyVariable>()?;
+    m.add_class::<PyVariableContext>()?;
     m.add_class::<PyConstraint>()?;
     m.add_class::<PyQuery>()?;
     m.add_function(wrap_pyfunction!(register_type, m)?)?;
